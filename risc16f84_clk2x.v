@@ -150,6 +150,9 @@
 //                  an error such that all subtraction results were off by 1.
 //                  Obviously, this was unacceptable, and I think it has been fixed
 //                  by the new signals "c_subtract_zero" and "c_dig_subtract_zero"
+// Update: 10/24/05 Added code patches to fix interrupt bug and status flag updates
+//                  when using literal value of 0x03.  These bugs were reported by
+//                  an opencores.org user.  Added three "disable_status_x" signals.
 //
 // Description
 //---------------------------------------------------------------------------
@@ -342,6 +345,10 @@ reg  c_subtract_zero;     // High for special case of C bit, when subtracting ze
 reg  c_dig_subtract_zero; // High for special case of C bit, when subtracting zero
 
 wire next_exec_stall;
+     // Three signals used to disable status flag updates.  Fixes bug when literal 0x03 is used.
+wire disable_status_z;
+wire disable_status_c;
+wire disable_status_dc;
 
 //--------------------------------------------------------------------------
 // Instantiations
@@ -434,6 +441,19 @@ assign addr_aux_adr_hi = (ram_adr_node[7:0] == 8'b00000110); // 06H
 
 // construct bit-mask for logical operations and bit tests
 assign mask_node = 1 << inst_reg[9:7];
+
+// disable write access for status flags
+assign disable_status_z  = (inst_addwf || inst_andwf || inst_clrf  || 
+                            inst_clrw  || inst_comf  || inst_decf  || 
+                            inst_incf  || inst_iorwf || inst_movf  || 
+                            inst_subwf || inst_xorwf || inst_addlw || 
+                            inst_andlw || inst_iorlw || inst_iorlw || 
+                            inst_sublw || inst_xorlw) ? 1:0;
+assign disable_status_c  = (inst_addwf || inst_subwf || inst_rlf   || 
+                            inst_rrf   || inst_addlw || inst_sublw ) ? 1:0;
+assign disable_status_dc = (inst_addwf || inst_subwf || inst_addlw || 
+                            inst_sublw ) ? 1:0;
+
 
 // Create the exec_stall signal, based on the contents of the currently
 // executing instruction (inst_reg).  next_exec_stall reflects the state
@@ -800,6 +820,7 @@ begin
 
       if (writew_node) w_reg   <= aluout;    // write W reg
 
+
       // 2-5-2-2. Set data RAM/special registers,
       if (writeram_node)
       begin
@@ -807,7 +828,8 @@ begin
         begin
           status_reg[7:5] <= aluout[7:5];      // write IRP,RP1,RP0
           // status(4),status(3)...unwritable, see below (/PD,/T0 part)
-          status_reg[1:0] <= aluout[1:0];      // write DC,C
+          if( ~disable_status_c ) status_reg[0] <= aluout[0]; // write C
+          if( ~disable_status_dc ) status_reg[1] <= aluout[1]; // write DC
         end
         if (addr_fsr)         fsr_reg <= aluout;       // write FSR
         if (addr_pclath)   pclath_reg <= aluout[4:0];  // write PCLATH
@@ -817,7 +839,7 @@ begin
       end
 
       // 2-5-2-3. Set/clear Z flag.
-      if (addr_stat) status_reg[2] <= aluout[2]; // (dest. is Z flag)
+      if (addr_stat && ~disable_status_z) status_reg[2] <= aluout[2];
       else if (   inst_addlw || inst_addwf || inst_andlw || inst_andwf
                || inst_clrf  || inst_clrw  || inst_comf  || inst_decf
                || inst_incf  || inst_movf  || inst_sublw || inst_subwf
@@ -919,7 +941,7 @@ end
 
 // Issue an interrupt when the interrupt is present.
 // Also, do not issue an interrupt when there is a stall cycle coming!
-assign int_condition = (inte_sync_reg && ~exec_stall_reg && intcon_reg[7]);
+assign int_condition = (inte_sync_reg && ~exec_stall_reg && ~next_exec_stall && intcon_reg[7]);
                                // Interrupt must be pending
                                // Next processor cycle must not be a stall
                                // GIE bit must be set to issue interrupt
