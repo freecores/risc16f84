@@ -153,6 +153,7 @@
 // Update: 10/24/05 Added code patches to fix interrupt bug and status flag updates
 //                  when using literal value of 0x03.  These bugs were reported by
 //                  an opencores.org user.  Added three "disable_status_x" signals.
+//                  Modified file still needs to be tested.
 //
 // Description
 //---------------------------------------------------------------------------
